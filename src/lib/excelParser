@@ -1,0 +1,160 @@
+import * as XLSX from 'xlsx';
+
+// 定义单词类型
+export interface Word {
+  id: string;
+  japanese: string;
+  chinese: string;
+  pronunciation?: string;
+  example?: string;
+}
+
+/**
+ * 解析Excel文件并提取单词数据
+ * @param file - 上传的Excel文件
+ * @returns 解析后的单词数组Promise
+ */
+export const parseExcelFile = async (file: File): Promise<Word[]> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        
+        // 获取第一个工作表
+        if (workbook.SheetNames.length === 0) {
+          reject(new Error('Excel文件中没有找到工作表，请确保文件包含数据'));
+          return;
+        }
+        
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // 将工作表转换为JSON
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // 过滤空行
+        const nonEmptyRows = jsonData.filter(row => 
+          row.some((cell: any) => cell !== null && cell !== undefined && cell !== '')
+        );
+        
+        if (nonEmptyRows.length < 2) {
+          reject(new Error('Excel文件中没有足够的数据，请确保包含标题行和至少一个单词数据行'));
+          return;
+        }
+        
+        // 获取标题行并标准化（更宽松的匹配）
+        const headers = nonEmptyRows[0].map((header: any) => 
+          header ? String(header).trim().toLowerCase() : ''
+        );
+        
+        // 查找必要的列索引（增加更多关键词提高识别率）
+        const japaneseIndex = headers.findIndex(h => 
+          h.includes('日语') || h.includes('日文') || h.includes('japanese') || 
+          h.includes('jp') || h.includes('nihongo')
+        );
+        
+        const chineseIndex = headers.findIndex(h => 
+          h.includes('中文') || h.includes('汉语') || h.includes('chinese') || 
+          h.includes('cn') || h.includes('zhongwen')
+        );
+        
+        const pronunciationIndex = headers.findIndex(h => 
+          h.includes('发音') || h.includes('罗马音') || h.includes('pronunciation') ||
+          h.includes('音') || h.includes('roma') || h.includes('reading')
+        );
+        
+        const exampleIndex = headers.findIndex(h => 
+          h.includes('例句') || h.includes('例子') || h.includes('example') ||
+          h.includes('句') || h.includes('sentence')
+        );
+        
+        // 验证必要的列是否存在，并提供具体错误信息
+        if (japaneseIndex === -1 && chineseIndex === -1) {
+          reject(new Error('未找到日语和中文列，请确保标题行包含"日语"或"中文"相关列'));
+          return;
+        } else if (japaneseIndex === -1) {
+          reject(new Error('未找到日语列，请确保标题行包含"日语"、"日文"或"japanese"等关键词'));
+          return;
+        } else if (chineseIndex === -1) {
+          reject(new Error('未找到中文列，请确保标题行包含"中文"、"汉语"或"chinese"等关键词'));
+          return;
+        }
+        
+        // 解析单词数据
+        const words: Word[] = [];
+        
+        // 从数据行开始解析（跳过标题行）
+        for (let i = 1; i < nonEmptyRows.length; i++) {
+          const row = nonEmptyRows[i];
+          
+          // 获取单元格数据并处理可能的空值
+          const japaneseCell = row[japaneseIndex];
+          const chineseCell = row[chineseIndex];
+          
+          // 跳过日语和中文都为空的行
+          if (!japaneseCell && !chineseCell) continue;
+          
+          // 验证单元格数据
+          if (!japaneseCell) {
+            reject(new Error(`第${i+1}行缺少日语单词数据，请检查文件内容`));
+            return;
+          }
+          
+          if (!chineseCell) {
+            reject(new Error(`第${i+1}行缺少中文翻译数据，请检查文件内容`));
+            return;
+          }
+          
+          const word: Word = {
+            id: `word-${Date.now()}-${i}`,
+            japanese: String(japaneseCell).trim(),
+            chinese: String(chineseCell).trim(),
+          };
+          
+          // 添加可选字段
+          if (pronunciationIndex !== -1 && row[pronunciationIndex]) {
+            word.pronunciation = String(row[pronunciationIndex]).trim();
+          }
+          
+          if (exampleIndex !== -1 && row[exampleIndex]) {
+            word.example = String(row[exampleIndex]).trim();
+          }
+          
+          words.push(word);
+        }
+        
+        if (words.length === 0) {
+          reject(new Error('未找到有效的单词数据，请检查文件格式和内容'));
+          return;
+        }
+        
+        resolve(words);
+      } catch (error) {
+        reject(new Error(`解析Excel文件时出错: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    };
+    
+    reader.onerror = () => {
+      reject(new Error('读取文件时出错，请检查文件是否损坏或格式是否正确'));
+    };
+    
+    reader.readAsArrayBuffer(file);
+  });
+};
+
+/**
+ * 随机打乱数组顺序
+ * @param array - 要打乱的数组
+ * @returns 打乱后的新数组
+ */
+export const shuffleArray = <T,>(array: T[]): T[] => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+};
